@@ -1,0 +1,177 @@
+---
+title: "PML Course Project"
+author: "Gaël Bonnardot"
+date: "23 août 2015"
+output: html_document
+---
+
+##1) Exploratory Analysis
+
+To get to know the data a bit better I used, dim(), head() and str() functions on the training data. 
+
+```{r}
+setwd("C:/Users/G/Documents/R")
+set.seed(3456)
+training<-read.csv("pml-training.csv")
+dim(training)
+```
+
+The data is relatively big: 19622 observations of 160 variables. Variable types are mainly numeric, integer and factors. There are 5 levels to the factor 'classe' that we wish to predict: {A,B,C,D,E}. As described on the website http://groupware.les.inf.puc-rio.br/har the classes correspond to different type of postures and movements, class A being the right posture to perform the Unilateral Dumbbell Biceps Curl exercise.
+
+Here is the structure of the data:
+
+Captors:
+
+* Belt
+* Arm
+* Dumbbell
+* Forearm
+
+Raw Data (19216 observations):
+
+* Pitch
+* Yaw
+* Roll
+* Total Acceleration
+* Gyros (X,Y,Z)
+* Acceleration (X,Y,Z)
+* Magnet (X,Y,Z)
+
+Summary Data (406 windows):
+
+* Kurtosis
+* Skewness
+* Maximum
+* Minimum
+* Standard Deviation
+* Variance
+* Amplitude
+
+Variable "cvtd_timestamp" tells us that the data was taken on 4 different days: 11/28/2011, 11/30/2011, 12/02/2011, 12/05/2011. We will assume that the data is not dependent on which day the sample is made. It could be worth checking if the results vary depending on what time of the day it is executed : we can imagine motion amplitude being smaller towards the end of the day. 
+
+Of the 19622 observations 19216 are raw data and 406 are aggregated data which correspond to all the raw data contained in the 406 windows. A smaller number of variables sum up the raw data information: minimum, maximum values, standard deviation, variance, average, kurtosis, skewness. However this is the case for pitch, yaw and roll measures and not for gyro, acceleration and magnet measures.
+
+Since the test set consists of point observations and not aggregated data on a whole window we will concentrate the training on the observation data.
+
+```{r}
+train1<-training[!complete.cases(training),]
+train1<-train1[,c(8:11,37:49,60:68,84:86,102,113:124,140,151:160)]
+dim(train1)
+```
+
+This leaves us with 52 variables, which is still an important number. 
+
+##2) Preprocessing
+
+###2.1) Dummy Variables
+
+As all of the 52 potential predictors are of type numeric or integer so no dummy variable needs to be created.
+
+###2.2) Near Zero/Zero Variance Predictors
+
+Using function nearZeroVar() we confirm that none of the 52 predictors have zero or near zero variance.
+
+```{r}
+library(caret)
+nearZeroVar(train1)
+```
+
+###2.3) Identifying Correlated Predictors
+
+Using function findCorrelation in the correlation matrix of the 52 predictors with cutoff 0.75 we remove 21 of the predictors, leaving us with 31 of the predictors, we will call the resulting training set train1.
+
+```{r}
+descrCor<-cor(train1[,-53])
+highlyCorDescr<-findCorrelation(descrCor, cutoff = .75)
+train1<-train1[,-highlyCorDescr]
+dim(train1)
+```
+
+###2.4) d.	Principal Component Analysis
+
+In order to cut down on the number of variables for each captor: belt, arm, dumbbell, forearm we conduct principal components analysis to find which variables for each captor explain most of the variance. 
+
+```{r}
+## PCA
+# 
+train2<-training[!complete.cases(training),]
+train2<-train2[,c(8:11,37:49,60:68,84:86,102,113:124,140,151:160)]
+# 
+# beltv=train2[,c(1:13)]
+# pcabelt<-PCA(beltv,graph=FALSE)
+# pcabelt$eig
+# pcabelt$var$coord
+# 
+# armv<-train2[,c(14:26)]
+# pcaarm<-PCA(armv,graph=FALSE)
+# pcaarm$eig
+# pcaarm$var$coord
+# 
+# dumbbellv<-train2[,c(27:39)]
+# pcadumbbell<-PCA(dumbbellv,graph=FALSE)
+# pcadumbbell$eig
+# pcadumbbell$var$coord
+# 
+# forearmv<-train2[,c(40:52)]
+# pcaforearm<-PCA(forearmv,graph=FALSE)
+# pcaforearm$eig
+# pcaforearm$var$coord'
+```
+
+We use 20 variables selected upon Principal Component Analysis results for each captor. We will call this second data set train2.
+
+```{r}
+train2<-train2[,c(1:3,10,13,17,19,21,25:27,29,31,35:36,45,48:51,53)]
+```
+
+###2.5) Centering and Scaling
+
+For both sets of variables we will use the "preprocess" argument in the train function to center and scale the variables.
+
+##3) Cross Validation
+
+In the trainControl argument of the train function we shall use "cv" (K-fold cross validation) and "repeatedcv" (repeated K-fold cross validation) with 10 folds and repeated thrice. For bagged trees or bagged earth we can use "oob" (out of bag estimates).
+
+##4) Modelling
+
+###4.1) Decision Tree ("Rpart" Method)
+
+```{r}
+modFit<-train(classe~.,method="rpart",data=train2)
+plot(modFit$finalModel,uniform=TRUE,main="Classification Tree")
+text(modFit$finalModel,use.n=TRUE,all=TRUE,cex=.8)
+print(modFit)
+```
+
+The Decision Tree on its own does not yield any interesting result, as expected.
+
+###4.2) Random Forests ("RF" Method)
+
+```{r}
+#modFit2<-train(classe~.,data=train2,method="rf",prox=TRUE)
+```
+
+I have found that given the number of variables and observations Random Forests performs slowly compared to Boosting, computation time was too long on my computer (4GB RAM, 64bit).
+
+###4.3) Boosting ("GBM" Method)
+
+```{r}
+#modFitBoost<-train(classe~.,method="gbm",data=train2,trControl=fitControl1,verbose=FALSE)
+```
+
+Resampling results across tuning parameters:
+
+  interaction.depth  n.trees  Accuracy   Kappa      Accuracy SD  Kappa SD   
+  1                   50      0.6616640  0.5666395  0.007652753  0.010012161
+  1                  100      0.7327739  0.6600340  0.006680726  0.008479507
+  1                  150      0.7727323  0.7113535  0.005295489  0.006708456
+  2                   50      0.7884311  0.7310242  0.007222317  0.009128935
+  2                  100      0.8513381  0.8115364  0.006329439  0.007978199
+  2                  150      0.8784463  0.8460102  0.004440406  0.005589620
+  3                   50      0.8444507  0.8026423  0.006253632  0.007888508
+  3                  100      0.8928770  0.8643127  0.005169636  0.006510608
+  3                  150      0.9175014  0.8955449  0.003552932  0.004503947
+
+##5) Predictions
+
+I have used Boosting with trees for predicting test data classes.
